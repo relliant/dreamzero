@@ -155,6 +155,14 @@ class EmbodimentTag(Enum):
 
     YAM = "yam"
 
+    RX2_BLACKBOX = "rx2_blackbox"
+    """
+    The RX-P2 27dof humanoid robot data collected via the Blackbox pipeline
+    (blackbox2lerobot). Single head-mounted camera (observation.images.ego_view),
+    state = observation.state(27) + left_gripper(1) + right_gripper(1),
+    action = action.wbc(27) + left_gripper(1) + right_gripper(1).
+    """
+
     DREAM = "dream"
     """
     The datasets with DREAM actions.

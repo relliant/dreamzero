@@ -1,0 +1,85 @@
+# Full training: 8 GPUs, 100k steps, LoRA fine-tune from DreamZero-AgiBot.
+#
+# Type is `shell` (not torch_trainer) because we rely on the pre-built NAS
+# .venv for reproducibility instead of ray's pip_directories injection. The
+# tradeoffs vs torch_trainer are:
+#   - lose MLflow auto Run (we use wandb -> irrelevant)
+#   - lose auto rank injection (torchrun --standalone handles this on one node)
+#   - lose pip_packages / conda_preset (we handle deps via the venv)
+# If we ever move to multi-node, switch to torch_trainer.
+#
+# Submit with:
+#   md_ak submit jobs/rx2_blackbox_train.yaml
+config_version: 1
+cluster: aliyun_h100
+num_gpus: 8
+image: ai-base:starvla-cuda12.8_devel-ubuntu22.04-v5
+experiment_name: dreamzero-rx2-blackbox-lora
+
+shared_workspace: /data/nas_ray/home/siyu.luo/project/dreamzero
+log_folder: logs
+
+# Wandb: default offline. To go online, set WANDB_API_KEY here and change
+# report_to=wandb + wandb.mode=online in args below.
+os_env_vars:
+  WANDB_MODE: offline
+
+tasks:
+  - name: train
+    type: shell
+    run_name: train
+    cmd: >
+      set -euo pipefail &&
+      cd /data/nas_ray/home/siyu.luo/project/dreamzero &&
+      source .venv/bin/activate &&
+      python -c 'import sys, torch; print("py", sys.version.split()[0], "torch", torch.__version__, "cuda", torch.cuda.is_available(), "device_count", torch.cuda.device_count())' &&
+      test -d ./checkpoints/DreamZero-AgiBot &&
+      test -d ./checkpoints/Wan2.1-I2V-14B-480P &&
+      test -d ./checkpoints/umt5-xxl &&
+      test -f /data/nas_ray/home/siyu.luo/project/dreamzero_datasets/rx2_blackbox/20260820_pick_up_the_bottle_and_put_it_in_the_basket/sortie_0071_0275_train200_30hz_encoder_complete/meta/modality.json &&
+      torchrun --nproc_per_node 8 --standalone
+      groot/vla/experiment/experiment.py
+      data=dreamzero/rx2_blackbox_relative
+      report_to=wandb
+      wandb_project=dreamzero
+      train_architecture=lora
+      num_frames=33
+      action_horizon=24
+      num_views=1
+      model=dreamzero/vla
+      model/dreamzero/action_head=wan_flow_matching_action_tf
+      model/dreamzero/transform=dreamzero_cotrain
+      num_frame_per_block=2
+      num_action_per_block=24
+      num_state_per_block=1
+      seed=42
+      training_args.learning_rate=1e-5
+      training_args.deepspeed=groot/vla/configs/deepspeed/zero2.json
+      save_steps=10000
+      training_args.warmup_ratio=0.05
+      output_dir=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/dreamzero_rx2_blackbox_lora
+      per_device_train_batch_size=4
+      max_steps=100000
+      weight_decay=1e-5
+      save_total_limit=10
+      upload_checkpoints=false
+      bf16=true
+      tf32=true
+      eval_bf16=true
+      dataloader_pin_memory=false
+      dataloader_num_workers=1
+      image_resolution_width=320
+      image_resolution_height=240
+      save_lora_only=true
+      max_chunk_size=4
+      frame_seqlen=1200
+      save_strategy=steps
+      'rx2_blackbox_datasets=[/data/nas_ray/home/siyu.luo/project/dreamzero_datasets/rx2_blackbox/20260820_pick_up_the_bottle_and_put_it_in_the_basket/sortie_0071_0275_train200_30hz_encoder_complete]'
+      dit_version=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/Wan2.1-I2V-14B-480P
+      text_encoder_pretrained_path=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/Wan2.1-I2V-14B-480P/models_t5_umt5-xxl-enc-bf16.pth
+      image_encoder_pretrained_path=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/Wan2.1-I2V-14B-480P/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth
+      vae_pretrained_path=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/Wan2.1-I2V-14B-480P/Wan2.1_VAE.pth
+      tokenizer_path=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/umt5-xxl
+      pretrained_model_path=/data/nas_ray/home/siyu.luo/project/dreamzero/checkpoints/DreamZero-AgiBot
+      ++action_head_cfg.config.skip_component_loading=true
+      ++action_head_cfg.config.defer_lora_injection=true
